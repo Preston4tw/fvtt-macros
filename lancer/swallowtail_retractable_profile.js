@@ -49,6 +49,8 @@
         name: slowName,
         icon: slowIcon,
         origin: actor.uuid,
+        description: "The only movement SLOWED characters can make is their standard move, on their own turn – they can’t BOOST or make any special moves granted by talents, systems, or weapons.",
+        statuses: ["slow"],
       },
     ];
 
