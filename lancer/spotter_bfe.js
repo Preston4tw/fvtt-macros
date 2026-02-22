@@ -18,3 +18,14 @@ ChatMessage.create({
   user: game.user.id,
   content: html,
 });
+
+/*
+// Could add a visual element with something like
+
+new Sequence()
+  .effect()
+  .file("jb2a.eldritch_blast.purple")
+  .atLocation(token)
+  .stretchTo(target)
+  .play();
+*/
