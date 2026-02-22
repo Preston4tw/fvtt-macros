@@ -1,4 +1,13 @@
 // work in progress
+/* Liked these effects, skimming through jb2a
+  jb2a.energy_field.01.blue
+  jb2a.extras.tmfx
+    jb2a.extras.tmfx.outflow.circle.01
+    jb2a.extras.tmfx.border.circle.simple.01
+  jb2a.fog_cloud
+  jb2a.markers.bubble.loop
+  jb2a.shield.01.loop
+*/
 // Define the Burst 2 radius. In Lancer, Burst 2 = 2.5 hexes/squares radius.
 // Adjust 'scale' based on your grid size; 5.0 usually covers a Burst 2.
 const burstSize = 6.5;
