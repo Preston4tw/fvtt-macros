@@ -1,4 +1,9 @@
 // work in progress
+// reference:
+// https://fantasycomputer.works/FoundryVTT-Sequencer/#/api/effect
+/* .locally() or .locally(bool)
+Causes effect to be played only locally, and not push to other connected clients.
+*/
 /* Liked these effects, skimming through jb2a
   jb2a.energy_field.01.blue
   jb2a.extras.tmfx
@@ -34,7 +39,7 @@ if (!token) {
       .file("jb2a.extras.tmfx.border.circle.simple.01") // Requires JB2A;
       .attachTo(token)
       .name("LBOC-Cloaking-Field")
-      .scaleToObject(burstSize)
+      .scaleToObject(burstSize, { uniform: false, considerTokenScale: false}) // defaults false,false, play with it and see if changing options does anything we like
       .opacity(0.5)
       .persist()
       .fadeIn(500)
@@ -45,3 +50,21 @@ if (!token) {
     // game.lancer.putCondition(token.actor, "slowed", true);
   }
 }
+
+/*
+// how to do a circle
+new Sequence()
+    .effect()
+        .attachTo(token)
+        .persist()
+        .shape("circle", {
+            lineSize: 4,
+            lineColor: "#FF0000",
+            radius: 1.5,
+            gridUnits: true,
+            name: "test"
+        })
+        .loopProperty("shapes.test", "scale.x", { from: 0.9, to: 1.1, duration: 1000, pingPong: true, ease: "easeInOutSine" })
+        .loopProperty("shapes.test", "scale.y", { from: 0.9, to: 1.1, duration: 1000, pingPong: true, ease: "easeInOutSine" })
+    .play()
+*/
