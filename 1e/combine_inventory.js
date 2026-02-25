@@ -1,143 +1,151 @@
 /**
- * 1E Macro to combine identical items and currency in an inventory.
- * Has Dry-Run mode to report changes without making them.
- * Filters for Owned Actors.
+ * ARS/OSRIC Hardened Consolidator v8
+ * Hierarchical Sort + Sub-Item Precision + Magic Awareness
  */
 
-const ownedActors = game.actors
-  .filter((a) => a.isOwner && a.type === "character")
-  .map((a) => `<option value="${a.id}">${a.name}</option>`)
-  .join("");
+(async () => {
+  let actorTargets = game.actors.filter(
+    (a) => ["character", "lootable"].includes(a.type) && a.isOwner,
+  );
 
-if (ownedActors.length === 0) {
-  ui.notifications.error("No owned characters or stashes found.");
-} else {
-  const dialogContent = `
-        <form>
-            <div class="form-group">
-                <label>Target Actor:</label>
-                <select id="target-id">${ownedActors}</select>
-            </div>
-            <hr>
-            <div class="form-group">
-                <label>Dry Run (Report Only):</label>
-                <input type="checkbox" id="dry-run" checked>
-            </div>
-            <p><small><i>Dry Run will whisper the result to you without changing inventory.</i></small></p>
-        </form>`;
+  if (actorTargets.length === 0)
+    return ui.notifications.warn("No owned characters or stashes found.");
+
+  // Hierarchical Sort: Characters A-Z, then Lootables A-Z
+  actorTargets.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "character" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const options = actorTargets
+    .map((a) => `<option value="${a.id}">${a.name} (${a.type})</option>`)
+    .join("");
 
   new Dialog({
-    title: "Combine Inventory",
-    content: dialogContent,
+    title: "Inventory Management: Final Pathing",
+    content: `
+            <form>
+                <div class="form-group"><label>Target:</label><select id="actor-id" style="width: 100%">${options}</select></div>
+                <div class="form-group"><label>Dry Run:</label><input type="checkbox" id="dry-run" checked></div>
+                <hr><p><small><b>Logic:</b> Eliminates all weightless sub-items and merges physical goods by Name + Weight + Magic Bonus.</small></p>
+            </form>`,
     buttons: {
       execute: {
-        label: "Run",
+        icon: '<i class="fas fa-boxes"></i>',
+        label: "Execute",
         callback: async (html) => {
-          const actorId = html.find("#target-id").val();
+          const actor = game.actors.get(html.find("#actor-id").val());
           const isDryRun = html.find("#dry-run").is(":checked");
-          const actor = game.actors.get(actorId);
-
-          // 1. Filter tangible types
-          const tangibleTypes = [
-            "item",
-            "gear",
-            "weapon",
-            "armor",
-            "loot",
-            "equipment",
-          ];
-          const items = actor.items.contents.filter((i) =>
-            tangibleTypes.includes(i.type),
-          );
-
-          // May need to be expanded
-          const currencyNames = {
-            "Electrum Coins": ["Electrum Coins"],
-            "Silver Coins": ["Silver Coins"],
-            "Gold Coin": ["Gold Coin", "Gold Coins"],
-          };
-
-          const groups = new Map();
-
-          // 2. Map items by Name + Weight
-          for (const item of items) {
-            let key = item.name;
-            let finalName = item.name;
-            for (const [pref, aliases] of Object.entries(currencyNames)) {
-              if (aliases.includes(item.name)) {
-                key = `CURR_${pref}`;
-                finalName = pref;
-                break;
-              }
-            }
-            if (!key.startsWith("CURR_"))
-              key = `${item.name}_${item.system.weight || 0}`.toLowerCase();
-
-            if (!groups.has(key))
-              groups.set(key, {
-                master: item,
-                duplicates: [],
-                finalName,
-                totalQty: 0,
-              });
-            const data = groups.get(key);
-            data.totalQty += item.system.quantity || 1;
-            if (item.id !== data.master.id) data.duplicates.push(item.id);
-          }
-
-          // 3. Prepare Updates
-          let updateData = [];
-          let deleteIds = [];
-          let report = `<b>${isDryRun ? "DRY RUN" : "LIVE"} REPORT: ${actor.name}</b><br>`;
-          let changesMade = false;
-
-          for (const [key, data] of groups) {
-            if (data.duplicates.length > 0) {
-              changesMade = true;
-              updateData.push({
-                _id: data.master.id,
-                name: data.finalName,
-                "system.quantity": data.totalQty,
-              });
-              deleteIds.push(...data.duplicates);
-              report += `• Combine ${data.duplicates.length + 1} stacks of ${data.finalName} (Total: ${data.totalQty})<br>`;
-            }
-          }
-
-          if (!changesMade) {
-            return ui.notifications.info(
-              `${actor.name} is already consolidated.`,
-            );
-          }
-
-          // 4. Execution or Whisper
-          if (isDryRun) {
-            ChatMessage.create({
-              user: game.user._id,
-              content:
-                report + "<br><i>No changes were made to the database.</i>",
-              whisper: [game.user._id],
-            });
-            ui.notifications.info("Dry run complete. Check chat for report.");
-          } else {
-            // Console Backup before Live change
-            console.warn(
-              `LIVE CONSOLIDATION BACKUP [${actor.name}]:`,
-              JSON.stringify(actor.toJSON().items),
-            );
-
-            await actor.updateEmbeddedDocuments("Item", updateData);
-            await actor.deleteEmbeddedDocuments("Item", deleteIds);
-
-            ChatMessage.create({
-              user: game.user._id,
-              content: report + "<br><b>LIVE CHANGES APPLIED.</b>",
-              whisper: [game.user._id],
-            });
-            ui.notifications.info(`Consolidation of ${actor.name} complete.`);
-          }
+          await performPrecisionClean(actor, isDryRun);
         },
       },
     },
+    default: "execute",
   }).render(true);
+})();
+
+async function performPrecisionClean(actor, isDryRun) {
+  const validTypes = [
+    "item",
+    "gear",
+    "currency",
+    "treasure",
+    "loot",
+    "equipment",
+    "weapon",
+    "armor",
+  ];
+
+  // Process ALL items to find children/parents
+  const allItems = actor.items.contents;
+  const physicalGroups = new Map();
+  const subItemIds = [];
+  const currencyNames = [
+    "gold coin",
+    "silver coin",
+    "electrum coin",
+    "copper coin",
+    "platinum coin",
+  ];
+
+  for (const item of allItems) {
+    if (!validTypes.includes(item.type)) continue;
+
+    const weight = Number(item.system.weight ?? 0);
+    const isMagic = item.system.attributes?.magic || false;
+    const magicBonus = item.system.attack?.magicBonus || 0;
+
+    // TACTICAL FIX: Check if item is a child or a system action stub (wt 0)
+    const isSubItem = actor.items.some((parent) =>
+      parent.system.itemList?.some((child) => child.id === item.id),
+    );
+
+    if (isSubItem || (weight === 0 && item.type === "weapon")) {
+      subItemIds.push(item.id);
+      continue;
+    }
+
+    // Name Normalization
+    let cleanName = item.name.replace(/[^\x00-\x7F]/g, "").trim();
+    for (const c of currencyNames) {
+      if (cleanName.toLowerCase().includes(c)) {
+        cleanName =
+          c
+            .split(" ")
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ") + "s";
+        break;
+      }
+    }
+
+    // Key: Name + Weight + Magic Bonus (Prevents Dagger merging with Dagger +1)
+    const key = `${cleanName.toLowerCase()}_${weight}_${magicBonus}`;
+    if (!physicalGroups.has(key)) {
+      physicalGroups.set(key, {
+        master: item,
+        name: cleanName,
+        totalQty: 0,
+        duplicates: [],
+      });
+    }
+
+    const group = physicalGroups.get(key);
+    group.totalQty += Number(item.system.quantity ?? 1);
+    if (item.id !== group.master.id) group.duplicates.push(item.id);
+  }
+
+  let updates = [];
+  let deletes = [...subItemIds];
+  let reportRows = "";
+
+  for (const [key, data] of physicalGroups) {
+    if (data.duplicates.length > 0) {
+      updates.push({
+        _id: data.master.id,
+        "system.quantity": data.totalQty,
+        name: data.name,
+      });
+      deletes.push(...data.duplicates);
+      reportRows += `<li><b>${data.name}</b>: Merged into stack of ${data.totalQty}</li>`;
+    }
+  }
+
+  if (updates.length === 0 && subItemIds.length === 0)
+    return ui.notifications.info(`${actor.name} is already lean.`);
+
+  const reportContent = `<h3>${isDryRun ? "DRY RUN" : "LIVE"} Precision Clean: ${actor.name}</h3>
+                           <p>Physical Merges:</p><ul>${reportRows || "<li>None</li>"}</ul>
+                           <p>Virtual Sub-Items Removed: ${subItemIds.length}</p>`;
+
+  if (isDryRun) {
+    ChatMessage.create({ content: reportContent, whisper: [game.user.id] });
+  } else {
+    await actor.updateEmbeddedDocuments("Item", updates);
+    await actor.deleteEmbeddedDocuments("Item", deletes);
+    ChatMessage.create({
+      content: reportContent + "<p><b>Inventory Sanitized.</b></p>",
+      whisper: [game.user.id],
+    });
+    ui.notifications.info(`Sanitized ${actor.name}.`);
+  }
 }
